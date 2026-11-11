@@ -1,0 +1,6 @@
+{
+  "global": {
+    "ctrl-tab": "terminal-switcher.next",
+    "ctrl-shift-tab": "terminal-switcher.prev"
+  }
+}
