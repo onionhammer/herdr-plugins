@@ -24,9 +24,9 @@ What these mods do on your machine:
 - **branch-cleanup** runs `git fetch --all --prune`, which reaches your remotes. It runs `git branch -D` only on the branches you tick.
 - **branch-status** runs `git rev-parse` and watches the repo's `.git` folder.
 - **terminal-switcher** runs `hc read` on each terminal while its card is open, to show the previews. It needs a float added to your layout and two keys in `keys.json`, as its `RECIPE.md` shows. Those keys replace Herdr's Ctrl+Tab / Ctrl+Shift+Tab tab switching.
+- **scratch-pad** reads and writes its notes in `~/.config/herdr-app/scratch-pad/`, one markdown file per space, and watches that folder. It runs no programs and makes no network calls. It needs a block and a float added to your layout, a key in `keys.json`, and two lines changed in a clone of Herdr's tab bar for the button, as its `RECIPE.md` shows.
 
 ## New features
 Start with
 
 > Read ~/.config/herdr-app/AGENTS.md
-- **scratch-pad** reads and writes its notes in `~/.config/herdr-app/scratch-pad/`, one markdown file per space, and watches that folder. It runs no programs and makes no network calls. It needs a block and a float added to your layout, a key in `keys.json`, and two lines changed in a clone of Herdr's tab bar for the button, as its `RECIPE.md` shows.
