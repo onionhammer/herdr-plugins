@@ -23,7 +23,7 @@
 import { View, div, svg, image } from "gpui-kit";
 import { h_flex, v_flex, ScrollHandle } from "gpui-base";
 import {
-  closeOverlay, focused, hc, home, layout, nextCommand, notify, openOverlay, panes,
+  closeOverlay, focused, hc, home, layout, machines, nextCommand, notify, openOverlay, panes,
   props, run, settings, setShared, shared, spaces, terminals, theme,
 } from "herdr";
 
@@ -40,8 +40,11 @@ const REFRESH_MS = 1000;
 const STATUSES = new Set(["working", "blocked", "done", "idle"]);
 
 // Shared by both copies (same module): the open picker's inbox, or a stand-in
-// that queues presses made before the picker has started.
-const bus = { inbox: null };
+// that queues presses made before the picker has started; and the switch the
+// picker just made, so the terminals it passes through on the way (the other
+// space's shown pane, the tab's) don't count as used.
+const bus = { inbox: null, going: null };
+const GOING_MS = 3000;
 
 class Inbox {
   constructor() { this.items = []; this.wake = null; this.picker = false; this.seen = 0; }
@@ -138,12 +141,22 @@ function everyTerminal() {
   return out;
 }
 
-// `order` first (addresses, most recent first), then the rest as listed.
+// Most recently used first: `order` (addresses, most recent first), then the
+// terminals the switcher hasn't seen used. Herdr keeps no times, so for those it
+// goes by what each space shows: a space's shown tab is the one last used there,
+// and the shown space's is the most recent of all. The rest keep sidebar order.
+function guess(e) {
+  if (e.quick || !e.tab?.active) return 2;
+  return e.space.active ? 0 : 1;
+}
 function arrange(list, order) {
   const rank = new Map();
   order.forEach((a, i) => { if (a && !rank.has(a)) rank.set(a, i); });
-  const n = order.length;
-  return list.map((e, i) => ({ e, r: rank.get(e.address) ?? n + i })).sort((a, b) => a.r - b.r).map((x) => x.e);
+  const key = (e, i) => (rank.has(e.address) ? [0, rank.get(e.address)] : [1 + guess(e), i]);
+  return list
+    .map((e, i) => ({ e, k: key(e, i) }))
+    .sort((a, b) => a.k[0] - b.k[0] || a.k[1] - b.k[1])
+    .map((x) => x.e);
 }
 
 // The bottom of a screen: its last LINES lines that aren't blank.
@@ -197,12 +210,22 @@ export default class TerminalSwitcher extends View {
     });
   }
 
-  // The terminal that has the keyboard goes to the front.
+  // The terminal that has the keyboard goes to the front. While the picker's
+  // switch is on its way, only its destination counts.
   note() {
     const a = focused()?.terminal;
+    const going = bus.going;
+    if (going) {
+      if (Date.now() > going.until) bus.going = null;
+      else if (a !== going.to) return;
+      else bus.going = null;
+    }
     if (!a || a === this.order[0]) return;
+    // Forget ended terminals, but not those on a machine that isn't loaded now.
     const live = new Set(terminals().map((x) => x.address));
-    this.order = [a, ...this.order.filter((x) => x !== a && (!live.size || live.has(x)))].slice(0, 100);
+    const loaded = new Set(machines().filter((m) => m.layout === "ready").map((m) => m.name ?? null));
+    const ended = (x) => live.size && loaded.has(machineOf(x)) && !live.has(x);
+    this.order = [a, ...this.order.filter((x) => x !== a && !ended(x))].slice(0, 200);
     saveOrder(this.order);
   }
 
@@ -221,6 +244,8 @@ export default class TerminalSwitcher extends View {
     this.done = false;
     this.cols = 1;
     this.last = { from: null, step: 0, time: 0 };
+    this.hovered = null;
+    this.closing = new Map(); // address → when its × was pressed
     this.reading = false;
 
     // Presses made while it was opening, then the ones after.
@@ -247,9 +272,33 @@ export default class TerminalSwitcher extends View {
   }
 
   list() {
-    const all = everyTerminal();
+    // A closed tile goes at once, before Herdr's lists catch up. If the terminal
+    // is still there a moment later (its space's close was cancelled), it's back.
+    const now = Date.now();
+    const all = everyTerminal().filter((e) => !(now - (this.closing.get(e.address) ?? -Infinity) < 1500));
     // Opened order; anything that started since goes last.
     return arrange(all, this.order);
+  }
+
+  // The tile's × or a middle click: what the pane header's × does (pane.close),
+  // or terminal.kill for a quick terminal, as its own header's × does. The card
+  // stays open, with the pick on the tile that takes this one's place.
+  shut(e, cx) {
+    if (this.done) return;
+    this.closing.set(e.address, Date.now());
+    if (e.quick) run("terminal.kill", { terminal: e.address });
+    else run("pane.close", { pane: e.pane });
+    if (e.address === this.here) this.here = null;
+    if (this.hovered === e.address) this.hovered = null;
+    // Closing a pane can move the keyboard; the card needs it to see Ctrl let go.
+    this.handle.focus();
+    cx.spawn(async (cx) => {
+      await cx.sleep(80);
+      if (this.done) return;
+      this.handle.focus();
+      cx.notify();
+    });
+    cx.notify();
   }
 
   // Every terminal's screen. A slow machine holds up the next round, not the window.
@@ -305,6 +354,7 @@ export default class TerminalSwitcher extends View {
     if (!e || e.address === this.here) return;
     const space = spaces().find((s) => s.id === e.space.id);
     if (!space) return;
+    bus.going = { to: e.address, until: Date.now() + GOING_MS };
     if (!space.active) run("space.select", { id: space.id });
     if (e.quick) {
       run("quick-terminal.show");
@@ -339,13 +389,25 @@ export default class TerminalSwitcher extends View {
       .bg(on ? t.selected : t.popover)
       .cursor_pointer()
       .hover((s) => s.bg(on ? t.selected : t.hover))
+      .on_hover((hovered, cx) => {
+        if (hovered) this.hovered = e.address;
+        else if (this.hovered === e.address) this.hovered = null;
+        cx.notify();
+      })
       .on_click(() => this.go(e))
+      .on_mouse_down("middle", (_ev, cx) => { cx.stop_propagation(); this.shut(e, cx); })
       .child(
         h_flex().h(18).gap(6).items_center()
           .when(Boolean(pic), (el) => el.child(pic))
           .child(div().flex_1().min_w(0).truncate().text_size(12).font_medium().text_color(t.foreground).child(name))
           .when(e.address === this.here, (el) => el.child(div().flex_none().text_size(10).text_color(t.dim).child("current")))
-          .when(Boolean(e.status), (el) => el.child(this.glyph(t, e.status))),
+          .when(Boolean(e.status), (el) => el.child(this.glyph(t, e.status)))
+          .when(on || this.hovered === e.address, (el) => el.child(
+            div().id(`ts-x-${e.address}`).flex_none().p(2).rounded(4).text_color(t.dim)
+              .hover((s) => s.bg(t.hover).text_color(t.foreground))
+              .on_mouse_down("left", (_ev, cx) => cx.stop_propagation())
+              .on_click((_ev, cx) => { cx.stop_propagation(); this.shut(e, cx); })
+              .child(svg("mods/pane/close.svg").size(12)))),
       )
       .child(
         div().h(PREVIEW_H).flex_none().overflow_hidden().rounded(6).bg(t.background).border_1().border_color(t.border).px(6).py(4)
@@ -425,7 +487,8 @@ export default class TerminalSwitcher extends View {
               .child(key("Tab")).child("next")
               .child(key("Shift+Tab")).child("back")
               .child(key("Ctrl")).child("let go to switch")
-              .child(key("Esc")).child("stay"),
+              .child(key("Esc")).child("stay")
+              .child(key("Middle-click")).child("close"),
           )
           .child(
             list.length
