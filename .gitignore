@@ -1,0 +1,4 @@
+# Written into every mod folder by Herdr / gpui-shell
+gpui-kit.d.ts
+jsconfig.json
+*.error
