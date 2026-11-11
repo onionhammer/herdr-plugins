@@ -1,26 +1,27 @@
-// Scratch pad: one plain page of notes per space, in a panel on the right of
-// the shown tab. The key shows the panel and puts the keyboard in it; pressed
+// Scratch pad: one plain page of notes per space. It's a third panel beside
+// Files and Changes, on the right of the shown tab: the same card, in the same
+// place, opened from the same row of buttons (a "Notes" button in the tab bar)
+// or with a key. The key shows the panel and puts the keyboard in it; pressed
 // again while you're typing there, it hides the panel and hands the keyboard
-// back to the pane. Each space has its own page and remembers whether its
-// panel is open.
+// back to the pane.
 //
 // A page is a markdown file, `scratch-pad/<space id>.md` in Herdr's folder
 // (~/.config/herdr-app), saved as you type. Anything else that edits the file
 // (an agent, an editor) shows up in the panel.
 //
 // One mod, two copies, told apart by props.role:
+//   "pad"         the panel: a header and the page. A child of the layout's
+//                 `panel-body` stack, with the id `scratch-pad`.
 //   "controller"  a floating block on the layout root that draws nothing. It is
 //                 always shown, so it gets the key's command while the panel is
-//                 hidden, and it keeps the panel in step with the shown space.
-//   "pad"         the panel: a header and the page.
+//                 hidden.
 //
-// The layout supplies the panel: a block with the id `scratch-pad`, hidden at
-// first. shared("scratch-pad") remembers { open: { <space id>: true }, focus }
-// (`focus`: when the keyboard was last asked into the page).
+// shared("scratch-pad") is { focus }: when the keyboard was last asked into the
+// page. Which panel a space shows is the tab bar's to remember, as for Files.
 //
 // Commands (keys.json): scratch-pad.toggle, scratch-pad.show, scratch-pad.hide.
 
-import { View, div, svg } from "gpui-kit";
+import { View, div } from "gpui-kit";
 import { v_flex, h_flex, TextareaState, Textarea } from "gpui-base";
 import {
   appHome, focused, layout, nextCommand, notify, panes, props, readTextFile,
@@ -28,7 +29,9 @@ import {
 } from "herdr";
 import * as fs from "fs/promises";
 
-const PANEL = "scratch-pad";
+const PANEL = "panel"; // the side panel: a column holding…
+const STACK = "panel-body"; // …a stack of Files, Changes and…
+const CHILD = "scratch-pad"; // …this
 const STATE = "scratch-pad";
 const FOLDER = "scratch-pad";
 const SAVE_AFTER = 600; // ms without typing before a page is saved
@@ -38,12 +41,8 @@ const slashes = (p) => (p ?? "").replace(/\\/g, "/");
 const folder = () => `${slashes(appHome())}/${FOLDER}`;
 // "sp12" is sp12.md; "vps/sp12" (a space on another machine) is vps--sp12.md.
 const fileFor = (space) => `${folder()}/${space.replace(/\//g, "--").replace(/[^A-Za-z0-9_.-]/g, "-")}.md`;
-const samePath = (a, b) => slashes(a).toLowerCase() === slashes(b).toLowerCase();
-
-function readState() {
-  const s = shared(STATE) ?? {};
-  return { open: { ...(s.open ?? {}) }, focus: s.focus ?? 0 };
-}
+// A watched path may come back spelled differently (\?\C:\…), so match its end.
+const endsWith = (path, tail) => slashes(path).toLowerCase().endsWith(tail.toLowerCase());
 
 function find(node, id) {
   if (!node || typeof node !== "object") return null;
@@ -55,13 +54,22 @@ function find(node, id) {
   return null;
 }
 
+// Typed here and not in the file yet. (A page with no file is "".)
+const dirty = (doc) => doc.text !== (doc.disk ?? "");
+
 const shownSpace = () => spaces().find((s) => s.active) ?? null;
 
-function setOpen(space, open) {
-  const s = readState();
-  if (open) { s.open[space] = true; s.focus = Date.now(); }
-  else delete s.open[space];
-  setShared(STATE, s);
+// Is the side panel open on the page?
+function showing() {
+  const root = layout(), panel = find(root, PANEL);
+  return Boolean(panel) && !panel.hidden && find(root, STACK)?.active === CHILD;
+}
+
+// Opens the side panel on the page and asks the keyboard into it.
+function show() {
+  run("layout.select", { stack: STACK, child: CHILD });
+  run("layout.show", { id: PANEL });
+  setShared(STATE, { focus: Date.now() });
 }
 
 export default class ScratchPad extends View {
@@ -74,36 +82,18 @@ export default class ScratchPad extends View {
   // ---- controller ----------------------------------------------------------
 
   initController(cx) {
-    this.applied = null; // what the panel was last told: "<space>|shown", "<space>|hidden"
     cx.spawn(async (cx) => {
       for (;;) {
         const command = await nextCommand();
-        const space = shownSpace();
-        if (!space) continue;
-        if (!find(layout(), PANEL)) {
-          notify({ title: "Scratch pad", body: `This layout has no "${PANEL}" block: add the panel from the scratch-pad recipe.`, level: "warning" });
+        if (!find(find(layout(), STACK), CHILD)) {
+          notify({ title: "Scratch pad", body: `This layout has no "${CHILD}" block in a "${STACK}" stack: add it from the scratch-pad recipe.`, level: "warning" });
           continue;
         }
-        const open = Boolean(readState().open[space.id]);
-        // A shown panel answers "toggle" itself: it knows whether it has the keyboard.
-        if (command === "show" || (command === "toggle" && !open)) setOpen(space.id, true);
-        else if (command === "hide" && open) setOpen(space.id, false);
+        // A shown page answers "toggle" itself: it knows whether it has the keyboard.
+        if (command === "show" || (command === "toggle" && !showing())) show();
+        else if (command === "hide" && showing()) run("layout.hide", { id: PANEL });
       }
     });
-  }
-
-  // Shows or hides the panel for the shown space. Runs after every render and
-  // does nothing when nothing changed.
-  reconcile() {
-    const space = shownSpace();
-    if (!space) return;
-    const open = Boolean(readState().open[space.id]);
-    const want = `${space.id}|${open ? "shown" : "hidden"}`;
-    if (want === this.applied) return;
-    this.applied = want;
-    const node = find(layout(), PANEL);
-    if (!node || Boolean(node.hidden) === !open) return;
-    run(open ? "layout.show" : "layout.hide", { id: PANEL });
   }
 
   // ---- pad -----------------------------------------------------------------
@@ -113,7 +103,6 @@ export default class ScratchPad extends View {
     this.docs = new Map(); // space id -> { path, text, disk, loaded, rev, saving }
     this.current = null; // the space whose page is shown
     this.typing = false; // the page has the keyboard
-    this.hovered = false;
     this.focusSeen = 0;
     // (Refused when the mod is checked from outside Herdr's folder: saving then says why.)
     this.ready = (async () => { await fs.mkdir(folder(), { recursive: true }); })().catch(() => {});
@@ -124,6 +113,7 @@ export default class ScratchPad extends View {
       for (;;) {
         const command = await nextCommand();
         if (command === "toggle") {
+          if (!showing()) continue; // the controller opens it
           if (this.typing) this.hide();
           else this.page.focus();
         } else if (command === "hide" && this.typing) this.giveBack();
@@ -135,18 +125,17 @@ export default class ScratchPad extends View {
       for (;;) {
         let paths;
         try { paths = await watchFolder(folder()); } catch { return; }
-        const all = paths.some((p) => samePath(p, folder()));
+        const all = paths.some((p) => endsWith(p, `/${FOLDER}`));
         for (const [space, doc] of this.docs) {
-          if (all || paths.some((p) => samePath(p, doc.path))) await this.reload(space, doc);
+          if (all || paths.some((p) => endsWith(p, doc.path.slice(folder().length)))) await this.reload(space, doc);
         }
       }
     });
   }
 
   hide() {
-    const space = shownSpace();
     if (this.typing) this.giveBack();
-    if (space) setOpen(space.id, false);
+    run("layout.hide", { id: PANEL });
   }
 
   // The keyboard goes back to the pane it came from, else the shown tab's first.
@@ -161,7 +150,7 @@ export default class ScratchPad extends View {
   sync(cx) {
     const space = shownSpace();
     if (space && space.id !== this.current) this.open(cx, space.id);
-    const asked = readState().focus;
+    const asked = shared(STATE)?.focus ?? 0;
     if (asked !== this.focusSeen) {
       this.focusSeen = asked;
       if (Date.now() - asked < FOCUS_WITHIN) this.page.focus();
@@ -201,7 +190,7 @@ export default class ScratchPad extends View {
   }
 
   flush(cx, doc) {
-    if (!doc?.loaded || doc.saving || doc.text === doc.disk) return;
+    if (!doc?.loaded || doc.saving || !dirty(doc)) return;
     cx.spawn(() => this.save(doc));
   }
 
@@ -211,9 +200,8 @@ export default class ScratchPad extends View {
     doc.saving = true;
     try {
       await this.ready;
-      for (let tries = 0; tries < 3 && doc.text !== doc.disk; tries++) {
+      for (let tries = 0; tries < 3 && dirty(doc); tries++) {
         const text = doc.text;
-        if (text === "" && doc.disk === null) break; // nothing written yet: no file
         try {
           await writeTextFile(doc.path, text, doc.disk);
           doc.disk = text;
@@ -234,10 +222,10 @@ export default class ScratchPad extends View {
 
   // Takes the file's text, unless there's something typed here that isn't saved yet.
   async reload(space, doc) {
-    if (!doc.loaded || doc.saving || doc.text !== doc.disk) return;
+    if (!doc.loaded || doc.saving || dirty(doc)) return;
     let disk = null;
     try { disk = await readTextFile(doc.path); } catch { return; }
-    if (disk === doc.disk || doc.saving || doc.text !== doc.disk) return;
+    if (disk === doc.disk || doc.saving || dirty(doc)) return;
     doc.disk = disk;
     doc.text = disk ?? "";
     if (this.current === space) this.page.set_value(doc.text);
@@ -245,7 +233,7 @@ export default class ScratchPad extends View {
 
   // Closing the app or the layout: save what's still waiting.
   async close() {
-    const waiting = [...(this.docs?.values() ?? [])].filter((d) => d.loaded && d.text !== d.disk);
+    const waiting = [...(this.docs?.values() ?? [])].filter((d) => d.loaded && dirty(d));
     await Promise.all(waiting.map((d) => this.save(d)));
   }
 
@@ -264,7 +252,6 @@ export default class ScratchPad extends View {
       .border_color(t.border)
       .text_color(t.foreground)
       .text_size(13)
-      .on_hover((hovered, cx) => { this.hovered = hovered; cx.notify(); })
       .child(h_flex()
         .h(42)
         .flex_none()
@@ -273,17 +260,8 @@ export default class ScratchPad extends View {
         .items_center()
         .border_b(1)
         .border_color(t.border)
-        .child(div().flex_none().font_semibold().child("Scratch pad"))
-        .child(div().flex_1().min_w(0).truncate().text_right().text_size(12).text_color(t.dim).child(space?.name ?? ""))
-        .when(this.hovered, (el) => el.child(div()
-          .id("scratch-pad-hide")
-          .flex_none()
-          .p(3)
-          .rounded(4)
-          .text_color(t.dim)
-          .hover((s) => s.bg(t.hover).text_color(t.foreground))
-          .on_click((_e, cx) => { cx.stop_propagation(); this.hide(); })
-          .child(svg("mods/pane/close.svg").size(14)))))
+        .child(div().flex_none().font_semibold().child("Notes"))
+        .child(div().flex_1().min_w(0).truncate().text_right().text_size(12).text_color(t.dim).child(space?.name ?? "")))
       .child(Textarea.new(this.page)
         .flex_1()
         .min_h(0)
@@ -298,9 +276,7 @@ export default class ScratchPad extends View {
 
   render(cx) {
     if (this.role === "controller") {
-      // Draws nothing; it reacts to what changed once this render is over.
-      cx.timer.after(0, () => this.reconcile());
-      return div();
+      return div(); // draws nothing
     }
     cx.timer.after(0, (cx) => this.sync(cx));
     return this.pad(theme());
