@@ -5,6 +5,7 @@ Mods for [Herdr](https://herdr.dev). Each folder holds one plugin, laid out like
 | Plugin | What it does |
 |---|---|
 | [branch-picker](branch-picker/) | Switch, create and check out git branches from a popup (VS Code's "Checkout to…"), with a status-bar branch button and a dialog that cleans up merged branches. |
+| [quick-terminal](quick-terminal/) | Ctrl+` opens a terminal under the shown tab (VS Code's terminal panel), one per space. Ctrl+` again hides it and leaves it running. |
 
 ## Installing
 
@@ -21,3 +22,4 @@ What these mods do on your machine:
 - **branch-picker** runs `git`. It reads refs, runs `git switch` and `git stash`, and makes no network calls of its own.
 - **branch-cleanup** runs `git fetch --all --prune`, which reaches your remotes. It runs `git branch -D` only on the branches you tick.
 - **branch-status** runs `git rev-parse` and watches the repo's `.git` folder.
+- **quick-terminal** starts shells with `hc run`, on another machine for a remote space. It rewrites the stack in the shown layout's file to show them. It ends a quick terminal when you close it or close its space. It needs nodes added to your own layout and a key in `keys.json`, as its `RECIPE.md` shows.
