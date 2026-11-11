@@ -220,7 +220,8 @@ export default class TerminalSwitcher extends View {
     this.text = {};
     this.done = false;
     this.cols = 1;
-    this.last = { from: null, time: 0 };
+    this.last = { from: null, step: 0, time: 0 };
+    this.reading = false;
 
     // Presses made while it was opening, then the ones after.
     const inbox = bus.inbox && !bus.inbox.picker ? bus.inbox : new Inbox();
@@ -251,27 +252,35 @@ export default class TerminalSwitcher extends View {
     return arrange(all, this.order);
   }
 
+  // Every terminal's screen. A slow machine holds up the next round, not the window.
   refresh(cx) {
+    if (this.inbox && !this.done) this.inbox.seen = Date.now();
+    if (this.reading || this.done) return;
+    this.reading = true;
     cx.spawn(async (cx) => {
-      if (this.inbox && !this.done) this.inbox.seen = Date.now();
-      const list = this.list();
-      await Promise.all(list.map(async (e) => {
-        try {
-          const r = await hc(["read", e.address]);
-          if (r.code === 0) this.text[e.address] = tail(r.stdout);
-        } catch {}
-      }));
+      try {
+        await Promise.all(this.list().map(async (e) => {
+          try {
+            const r = await hc(["read", e.address]);
+            if (r.code === 0) this.text[e.address] = tail(r.stdout);
+          } catch {}
+        }));
+      } finally {
+        this.reading = false;
+      }
       if (!this.done) cx.notify();
     });
   }
 
   // Tab and the controller's presses wrap around; up and down stop at the ends.
-  // One press can arrive twice (as a key here and as the controller's command),
-  // so a move from the other source right after one is the same press.
+  // One Ctrl+Tab can arrive twice (as a key here and as the controller's
+  // command), so the same step from the other route right after is that press.
   move(step, from, wrap) {
     const now = Date.now();
-    if (from !== this.last.from && now - this.last.time < 120) return;
-    this.last = { from, time: now };
+    const routes = new Set([from, this.last.from]);
+    const twice = routes.has("key") && routes.has("command") && step === this.last.step && now - this.last.time < 120;
+    this.last = { from, step, time: now };
+    if (twice) return;
     const n = this.order.length;
     if (!n) return;
     const at = this.at + step;
