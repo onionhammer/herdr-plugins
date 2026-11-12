@@ -5,6 +5,7 @@ Mods for [Herdr](https://herdr.dev). Each folder holds one plugin, laid out like
 | Plugin | What it does |
 |---|---|
 | [branch-picker](branch-picker/) | Switch, create and check out git branches from a popup (VS Code's "Checkout to…"), with a status-bar branch button and a dialog that cleans up merged branches. |
+| [quick-terminal](quick-terminal/) | Ctrl+` opens a terminal under the shown tab (VS Code's terminal panel), one per space. Ctrl+` again hides it and leaves it running. |
 | [terminal-switcher](terminal-switcher/) | Ctrl+Tab shows every terminal in every space as a tile with its latest screen, most recently used first (Alt+Tab for terminals). Let go of Ctrl to go there. |
 | [scratch-pad](scratch-pad/) | A page of notes for each space, in a Notes panel beside Files and Changes. Opened from the tab bar or with Ctrl+Shift+S, saved as you type to a markdown file. |
 
@@ -23,6 +24,7 @@ What these mods do on your machine:
 - **branch-picker** runs `git`. It reads refs, runs `git switch` and `git stash`, and makes no network calls of its own.
 - **branch-cleanup** runs `git fetch --all --prune`, which reaches your remotes. It runs `git branch -D` only on the branches you tick.
 - **branch-status** runs `git rev-parse` and watches the repo's `.git` folder.
+- **quick-terminal** starts shells with `hc run`, on another machine for a remote space. It rewrites the stack in the shown layout's file to show them. It ends a quick terminal when you close it or close its space. It needs nodes added to your own layout and a key in `keys.json`, as its `RECIPE.md` shows.
 - **terminal-switcher** runs `hc read` on each terminal while its card is open, to show the previews. It needs a float added to your layout and two keys in `keys.json`, as its `RECIPE.md` shows. Those keys replace Herdr's Ctrl+Tab / Ctrl+Shift+Tab tab switching.
 - **scratch-pad** reads and writes its notes in `~/.config/herdr-app/scratch-pad/`, one markdown file per space, and watches that folder. It runs no programs and makes no network calls. It needs a block and a float added to your layout, a key in `keys.json`, and two lines changed in a clone of Herdr's tab bar for the button, as its `RECIPE.md` shows.
 
