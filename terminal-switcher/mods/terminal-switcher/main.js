@@ -37,6 +37,7 @@ const GAP = 12;
 const MAX_COLS = 5;
 const LINES = 17;
 const REFRESH_MS = 1000;
+const POINT_PX = 8; // how far the pointer moves before it picks tiles
 const STATUSES = new Set(["working", "blocked", "done", "idle"]);
 
 // Shared by both copies (same module): the open picker's inbox, or a stand-in
@@ -245,6 +246,10 @@ export default class TerminalSwitcher extends View {
     this.cols = 1;
     this.last = { from: null, step: 0, time: 0 };
     this.hovered = null;
+    // The pointer picks too, once it has really moved: a pointer resting where
+    // the card opens, or a nudge during a quick Ctrl+Tab, keeps the pick.
+    this.pointer = null; // where the pointer was first seen
+    this.pointing = false;
     this.closing = new Map(); // address → when its × was pressed
     this.reading = false;
 
@@ -337,6 +342,23 @@ export default class TerminalSwitcher extends View {
     this.scroll.scroll_to_item(Math.floor(this.at / this.cols));
   }
 
+  // The tile under the pointer is the pick, so letting go of Ctrl goes there.
+  point(address) {
+    const i = this.order.indexOf(address);
+    if (i >= 0) this.at = i;
+  }
+
+  // The pointer counts once it's POINT_PX from where it was first seen; from
+  // then on it picks the tile it's over. True when that just happened.
+  moved(position) {
+    if (this.pointing || this.done) return false;
+    if (!this.pointer) { this.pointer = position; return false; }
+    if (Math.hypot(position.x - this.pointer.x, position.y - this.pointer.y) < POINT_PX) return false;
+    this.pointing = true;
+    if (this.hovered) this.point(this.hovered);
+    return true;
+  }
+
   selected() {
     return this.list().find((e) => e.address === this.order[this.at]) ?? null;
   }
@@ -390,11 +412,16 @@ export default class TerminalSwitcher extends View {
       .cursor_pointer()
       .hover((s) => s.bg(on ? t.selected : t.hover))
       .on_hover((hovered, cx) => {
-        if (hovered) this.hovered = e.address;
-        else if (this.hovered === e.address) this.hovered = null;
+        if (hovered) {
+          this.hovered = e.address;
+          if (this.pointing) this.point(e.address);
+        } else if (this.hovered === e.address) this.hovered = null;
         cx.notify();
       })
       .on_click(() => this.go(e))
+      // The card is open while Ctrl is held, and on macOS a click with Ctrl held
+      // arrives as a right-button press: that goes there too.
+      .on_mouse_down("right", (_ev, cx) => { cx.stop_propagation(); this.go(e); })
       .on_mouse_down("middle", (_ev, cx) => { cx.stop_propagation(); this.shut(e, cx); })
       .child(
         h_flex().h(18).gap(6).items_center()
@@ -406,6 +433,7 @@ export default class TerminalSwitcher extends View {
             div().id(`ts-x-${e.address}`).flex_none().p(2).rounded(4).text_color(t.dim)
               .hover((s) => s.bg(t.hover).text_color(t.foreground))
               .on_mouse_down("left", (_ev, cx) => cx.stop_propagation())
+              .on_mouse_down("right", (_ev, cx) => { cx.stop_propagation(); this.shut(e, cx); })
               .on_click((_ev, cx) => { cx.stop_propagation(); this.shut(e, cx); })
               .child(svg("mods/pane/close.svg").size(12)))),
       )
@@ -454,7 +482,9 @@ export default class TerminalSwitcher extends View {
         this.size = { width: size.width / zoom, height: size.height / zoom };
         cx.notify();
       })
+      .on_mouse_move((ev, cx) => { if (this.moved(ev.position)) cx.notify(); })
       .on_mouse_down("left", () => this.dismiss())
+      .on_mouse_down("right", () => this.dismiss())
       .on_key_down((ev, cx) => {
         const k = ev.key;
         if (k === "tab") this.move(ev.modifiers.shift ? -1 : 1, "key", true);
@@ -481,6 +511,7 @@ export default class TerminalSwitcher extends View {
           .border_color(t.border)
           .shadow_xl()
           .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+          .on_mouse_down("right", (_e, cx) => cx.stop_propagation())
           .child(
             h_flex().gap(8).items_center().text_size(11).text_color(t.dim)
               .child(div().flex_1().text_size(13).font_semibold().text_color(t.foreground).child("Switch terminal"))
