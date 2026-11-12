@@ -17,6 +17,11 @@ A page of notes for each space. It's a third panel beside Herdr's Files and Chan
   - Notes open, keyboard somewhere else: the keyboard goes to the page.
   - Notes open and you're typing in it: the panel closes and the keyboard goes back to the pane you were in.
 - **The Notes button** opens and closes the panel like the Files and Changes buttons do. It doesn't move the keyboard; click in the page to type.
+- **Ctrl+X** (Cmd+X on macOS) in the page, as in VS Code:
+  - Something selected: cuts it, as usual.
+  - Nothing selected: cuts the caret's whole line with its line break, and the clipboard holds the line plus `\n`. The caret goes to the start of the line that took its place, so Ctrl+V there puts the line back above it; Ctrl+X again takes the next line.
+  - On the last line, the line break before it goes instead, and the caret goes to the start of the line above. On an empty page nothing happens and the clipboard is left alone.
+  - One Ctrl+Z puts it back. The key does nothing new anywhere else: terminals and other mods' text fields keep theirs.
 - **Each space has its own page.** Switching spaces switches the page. Which panel a space shows (Files, Changes, Notes or none) is remembered per space by the tab bar, as it already is for Files and Changes.
 - **Saving.** A page is saved 0.6 s after you stop typing, when the keyboard leaves it, when you switch spaces, and when Herdr closes. There's no save key and nothing to name.
 - **Where it's kept.** `~/.config/herdr-app/scratch-pad/<space id>.md`; a space on another machine is `<machine>--<space id>.md`. The files stay on this computer. A page that was never typed in has no file.
@@ -30,7 +35,8 @@ A page of notes for each space. It's a third panel beside Herdr's Files and Chan
   - `"pad"` (the default) is the panel. It holds one `TextareaState`, and a map of pages by space id (`{ path, text, disk }`: what's typed and what the file held when last read or written). After every render (`cx.timer.after(0, …)`) it shows the shown space's page.
   - `"controller"` floats on the layout root and draws an empty `div()`. Floats are always shown, so it gets `scratch-pad.toggle`, `.show` and `.hide` from `nextCommand()` while the panel is hidden (commands only reach shown copies). It opens the panel with `layout.select {stack: "panel-body", child: "scratch-pad"}` and `layout.show {id: "panel"}`, then sets `shared("scratch-pad")` to `{ focus: <now> }`. The pad sees a new `focus` on its next render and takes the keyboard.
   - A shown pad answers `toggle` itself, because only it knows whether the page has the keyboard (the text state's `focus` and `blur` events).
-  - From `herdr`: `readTextFile`, `writeTextFile`, `watchFolder`, `run` (`layout.select`, `layout.show`, `layout.hide`, `pane.focus`), `layout`, `spaces`, `panes`, `focused`, `shared` / `setShared`, `settings`, `theme`, `props`, `notify`, `nextCommand`, `appHome`. From `fs/promises`: `mkdir`.
+  - **The cut key.** The pad's card declares `key_context("ScratchPad")` and `on_action("scratch_pad_cut", …)`. In `init` the pad calls `cx.bind_keys([{ keystroke: "ctrl-x", action: "scratch_pad_cut", context: "ScratchPad > Input" }])` (`"cmd-x"` when `window().platform` is `"macos"`). The handler `cut(cx)` works out what to cut, does it with `set_selected_range` + `replace("")`, and writes the clipboard with `cx.write_to_clipboard`.
+  - From `herdr`: `readTextFile`, `writeTextFile`, `watchFolder`, `run` (`layout.select`, `layout.show`, `layout.hide`, `pane.focus`), `layout`, `spaces`, `panes`, `focused`, `shared` / `setShared`, `settings`, `theme`, `props`, `notify`, `nextCommand`, `appHome`, `window`. From `fs/promises`: `mkdir`.
 - **The layout.** In a personal layout (clone `main` first: `herdr-app do layout.clone '{"name":"main","as":"my-main"}'`), add the pad to the `panel-body` stack, after `files` and `changes`:
 
   ```json
@@ -70,6 +76,10 @@ A page of notes for each space. It's a third panel beside Herdr's Files and Chan
 - **Saves use `writeTextFile`'s expected text.** If the file changed underneath, the write is refused; the mod reads the file again and writes over it, so what's typed here wins.
 - **`fs.mkdir` throws** when the mod is checked from a folder outside Herdr's (`herdr-app check` on a repo copy). Catch it, or the check fails.
 - **A restart mustn't steal the keyboard.** `shared` is kept across restarts, so the pad only acts on a `focus` request less than 3 s old.
+- **The text area binds Ctrl+X itself**, to a plain cut in its own `Input` context, and key-down handlers only see a key that no binding took. A binding in the pad's `"ScratchPad"` context alone is shallower and loses. Bind in `"ScratchPad > Input"`: that's the text area's depth, and the newer binding wins there. `bind_keys` is app-wide, so never bind the bare `Input` context: that takes Ctrl+X from every text field in Herdr.
+- **The text state can't say where the caret is.** It has `set_selected_range` and `replace`, but no getter. `cut` replaces the selection with a marker character no page holds (U+E000, or the next free one). The marker's index is the caret, and how much the text shrank is the selection's length. Then it removes the line, or the marker alone, with one more `replace`. Both edits land in the same instant, so the text area's undo, which groups edits made close together, takes them back as one. Don't rebuild the text with `set_value`: that bypasses undo history.
+- **Ranges are JavaScript string indices** (UTF-16, so an emoji is 2). `set_selected_range` refuses a backwards range (`start > end`).
+- **Monaco or another web editor can't be used.** Mods have no web view. The built-in `Editor` (`EditorState`) has line numbers, syntax colors and folding, but its state has no `focus()`, `set_selected_range` or `replace`. With it, Ctrl+Shift+S couldn't put the caret in the page, and Ctrl+X couldn't cut lines.
 - **Pane keys from the page.** While the page has the keyboard, `pane.go` and the other pane keys act on the pane you were in before, since the panel isn't a pane.
 - **Limits.** One page per space, plain text, up to 1 MiB (what `readTextFile` reads). Notes for a space on another machine are kept on this computer, so another computer's Herdr doesn't show them.
 - **One layout.** In a layout without the pad block, the key posts a warning toast.
@@ -81,6 +91,7 @@ A page of notes for each space. It's a third panel beside Herdr's Files and Chan
 - Ctrl+Shift+S opens the panel on Notes with the caret in the page. Typing shows up, and half a second later `scratch-pad/<space id>.md` holds it.
 - Ctrl+Shift+S again closes the panel, and typing goes to the pane you came from.
 - In a second space the page is empty; typing there makes a second file. Switching back shows the first space's notes, and its panel as you left it.
+- In the page, with three lines and the caret in the middle one, Ctrl+X leaves the first and third. The clipboard holds the middle line and a line break, and Ctrl+V puts it back. Ctrl+Z after a Ctrl+X restores the line in one step. With a word selected, Ctrl+X cuts only the word. Ctrl+X in a terminal still reaches the program.
 - With the panel open, appending a line to the space's file from a shell shows the line in the panel. Deleting the file empties the page.
 - The Notes, Files and Changes buttons swap the one panel between the three, and the lit button is the one showing.
 - After a restart with Notes open, the notes are there and the keyboard is still in the terminal.

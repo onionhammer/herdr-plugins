@@ -20,12 +20,13 @@
 // page. Which panel a space shows is the tab bar's to remember, as for Files.
 //
 // Commands (keys.json): scratch-pad.toggle, scratch-pad.show, scratch-pad.hide.
+// In the page, Ctrl+X (Cmd+X on macOS) with nothing selected cuts the whole line.
 
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex, TextareaState, Textarea } from "gpui-base";
 import {
   appHome, focused, layout, nextCommand, notify, panes, props, readTextFile,
-  run, setShared, settings, shared, spaces, theme, watchFolder, writeTextFile,
+  run, setShared, settings, shared, spaces, theme, watchFolder, window, writeTextFile,
 } from "herdr";
 import * as fs from "fs/promises";
 
@@ -36,6 +37,8 @@ const STATE = "scratch-pad";
 const FOLDER = "scratch-pad";
 const SAVE_AFTER = 600; // ms without typing before a page is saved
 const FOCUS_WITHIN = 3000; // a focus request older than this is history (a restart)
+const KEYS = "ScratchPad"; // the page's key context…
+const CUT = "scratch_pad_cut"; // …and the action its cut key runs there
 
 const slashes = (p) => (p ?? "").replace(/\\/g, "/");
 const folder = () => `${slashes(appHome())}/${FOLDER}`;
@@ -109,6 +112,13 @@ export default class ScratchPad extends View {
     this.page.on("change", (_e, cx) => this.changed(cx));
     this.page.on("focus", () => { this.typing = true; });
     this.page.on("blur", (_e, cx) => { this.typing = false; this.flush(cx, this.docs.get(this.current)); });
+    // The text area binds the cut key to its own cut, in its "Input" context. A
+    // binding of ours in the same context, inside the page's, is newer, so it
+    // comes first (and nowhere else changes).
+    try {
+      const key = window()?.platform === "macos" ? "cmd-x" : "ctrl-x";
+      cx.bind_keys([{ keystroke: key, action: CUT, context: `${KEYS} > Input` }]);
+    } catch {}
     cx.spawn(async (cx) => {
       for (;;) {
         const command = await nextCommand();
@@ -189,6 +199,38 @@ export default class ScratchPad extends View {
     cx.timer.after(SAVE_AFTER, (cx) => { if (doc.rev === rev) this.flush(cx, doc); });
   }
 
+  // The cut key: the selection, or with nothing selected the caret's whole line
+  // and its line break, as in VS Code. After cutting a line the caret is at the
+  // start of a line, so pasting there puts the line back above it.
+  //
+  // The text state can't say where the caret is, so a marker character briefly
+  // takes the selection's place to find it; the edits land within a moment of
+  // each other, and an undo takes them back together.
+  cut(cx) {
+    const before = this.page.value();
+    let mark = "\uE000"; // private use, and not in the page
+    while (before.includes(mark)) mark = String.fromCharCode(mark.charCodeAt(0) + 1);
+    this.page.replace(mark);
+    const at = this.page.value().indexOf(mark);
+    const selected = before.length + mark.length - this.page.value().length;
+    // What goes, [from, to) of `before`; and where the caret ends up, if not there.
+    let from = at, to = at + selected, clip = before.slice(from, to), caret = null;
+    if (!selected) {
+      const nl = before.indexOf("\n", at);
+      from = at && before.lastIndexOf("\n", at - 1) + 1;
+      to = nl < 0 ? before.length : nl + 1;
+      clip = before.slice(from, nl < 0 ? to : nl) + "\n";
+      if (nl < 0 && from > 0) { // the last line takes the break before it
+        from--;
+        caret = from && before.lastIndexOf("\n", from - 1) + 1;
+      }
+    }
+    this.page.set_selected_range({ start: from, end: to - selected + mark.length });
+    this.page.replace("");
+    if (caret !== null) this.page.set_selected_range({ start: caret, end: caret });
+    if (before) cx.write_to_clipboard(clip);
+  }
+
   flush(cx, doc) {
     if (!doc?.loaded || doc.saving || !dirty(doc)) return;
     cx.spawn(() => this.save(doc));
@@ -243,6 +285,8 @@ export default class ScratchPad extends View {
     const font = settings()?.font_family;
     return v_flex()
       .id("scratch-pad")
+      .key_context(KEYS)
+      .on_action(CUT, (_e, cx) => this.cut(cx))
       .size_full()
       .min_h(0)
       .rounded(10)
