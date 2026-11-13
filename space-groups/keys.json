@@ -1,0 +1,6 @@
+{
+  "global": {
+    "alt-pagedown": "space-groups.next",
+    "alt-pageup": "space-groups.prev"
+  }
+}

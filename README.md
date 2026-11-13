@@ -8,6 +8,7 @@ Mods for [Herdr](https://herdr.dev). Each folder holds one plugin, laid out like
 | [quick-terminal](quick-terminal/) | Ctrl+` opens a terminal under the shown tab (VS Code's terminal panel), one per space. Ctrl+` again hides it and leaves it running. |
 | [terminal-switcher](terminal-switcher/) | Ctrl+Tab shows every terminal in every space as a tile with its latest screen, most recently used first (Alt+Tab for terminals). Let go of Ctrl to go there. |
 | [scratch-pad](scratch-pad/) | A page of notes for each space, in a Notes panel beside Files and Changes. Opened from the tab bar or with Ctrl+Shift+S, saved as you type to a markdown file. |
+| [space-groups](space-groups/) | Name groups of spaces (Personal, Work 1, Work 2) and show one group at a time: pills above the spaces list filter the spaces and agents lists, new spaces join the shown group, and a dot says another group needs you. |
 
 ## Installing
 
@@ -27,6 +28,7 @@ What these mods do on your machine:
 - **quick-terminal** starts shells with `hc run`, on another machine for a remote space. It rewrites the stack in the shown layout's file to show them. It ends a quick terminal when you close it or close its space. It needs nodes added to your own layout and a key in `keys.json`, as its `RECIPE.md` shows.
 - **terminal-switcher** runs `hc read` on each terminal while its card is open, to show the previews. It needs a float added to your layout and two keys in `keys.json`, as its `RECIPE.md` shows. Those keys replace Herdr's Ctrl+Tab / Ctrl+Shift+Tab tab switching.
 - **scratch-pad** reads and writes its notes in `~/.config/herdr-app/scratch-pad/`, one markdown file per space, and watches that folder. It runs no programs and makes no network calls. It needs a block and a float added to your layout, a key in `keys.json`, and two lines changed in a clone of Herdr's tab bar for the button, as its `RECIPE.md` shows.
+- **space-groups** keeps its groups in Herdr's shared state (`shared.json`). It runs no programs, reads no files and makes no network calls. **space-groups-spaces** and **space-groups-agents** are clones of Herdr's own spaces and agents lists with a filter added, so they run what those lists run: `git` reads of each space's refs, `hc machine ls`, and `hc machine rm` / `add` when you click Connect on a rebuilt machine. They need a block added to your layout, the spaces and agents blocks pointed at the clones, and two keys in `keys.json`, as its `RECIPE.md` shows.
 
 ## New features
 Start with
