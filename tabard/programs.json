@@ -1,0 +1,12 @@
+{
+  "programs": {
+    "tabard": {
+      "name": "Tabard",
+      "icon": "program-icons/tabard.svg",
+      "tint": true,
+      "tile": "#8b2635",
+      "color": "#ffffff",
+      "run": ["tabard"]
+    }
+  }
+}

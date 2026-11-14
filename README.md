@@ -10,6 +10,7 @@ Mods for [Herdr](https://herdr.dev). Each folder holds one plugin, laid out like
 | [scratch-pad](scratch-pad/) | A page of notes for each space, in a Notes panel beside Files and Changes. Opened from the tab bar or with Ctrl+Shift+S, saved as you type to a markdown file. |
 | [drag-split](drag-split/) | Drag a tab down onto the panes to split it into the shown tab, or drag a pane's header up onto the tab bar to give it a tab of its own. The terminals keep running through the move. |
 | [space-groups](space-groups/) | Name groups of spaces (Personal, Work 1, Work 2) and show one group at a time: pills above the spaces list filter the spaces and agents lists, new spaces join the shown group, and a dot says another group needs you. |
+| [tabard](tabard/) | Adds [tabard](https://github.com/wivuu/wivuu.tabard), the Claude Code profile switcher, to the + menu as its first agent. ⌘⇧T opens the menu from the keyboard, and 1 starts Tabard. A tab starts Claude Code with the folder's last profile, or tabard's picker in a new folder. |
 
 ## Installing
 
@@ -21,6 +22,8 @@ To install by hand:
 2. Run `herdr-app check ~/.config/herdr-app/mods/<name>` for each one.
 3. Open the plugin the way its `RECIPE.md` describes under **Built from**.
 
+**tabard** also has a `programs.json` to merge into `~/.config/herdr-app/programs.json`, and a `program-icons/` folder to copy into `~/.config/herdr-app/`.
+
 What these mods do on your machine:
 
 - **branch-picker** runs `git`. It reads refs, runs `git switch` and `git stash`, and makes no network calls of its own.
@@ -31,6 +34,7 @@ What these mods do on your machine:
 - **scratch-pad** reads and writes its notes in `~/.config/herdr-app/scratch-pad/`, one markdown file per space, and watches that folder. It runs no programs and makes no network calls. It needs a block and a float added to your layout, a key in `keys.json`, and two lines changed in a clone of Herdr's tab bar for the button, as its `RECIPE.md` shows.
 - **drag-split** moves terminals between panes and tabs with Herdr's own commands (`terminal.park`, `terminal.keep`, `pane.swap`, `tab.move`). It runs no programs, reads no files and makes no network calls. **drag-split-header** is a clone of Herdr's pane header that starts the drags. Both need changes to your layout, plus some lines added to a clone of Herdr's tab bar, as its `RECIPE.md` shows.
 - **space-groups** keeps its groups in Herdr's shared state (`shared.json`). It runs no programs, reads no files and makes no network calls. **space-groups-spaces** and **space-groups-agents** are clones of Herdr's own spaces and agents lists with a filter added, so they run what those lists run: `git` reads of each space's refs, `hc machine ls`, and `hc machine rm` / `add` when you click Connect on a rebuilt machine. They need a block added to your layout, the spaces and agents blocks pointed at the clones, and two keys in `keys.json`, as its `RECIPE.md` shows.
+- **tabard** is a `programs.json` entry, an icon, and **tabard-menu**, a clone of Herdr's + menu that lists Tabard first. The menu checks which agents are installed on the space's machine, as Herdr's does. It runs `tabard` (and so `claude`) only when you pick it. It needs one line changed in a clone of Herdr's tab bar so the + button opens it, and a key in `keys.json` (⌘⇧T) to open it, as its `RECIPE.md` shows.
 
 ## New features
 Start with
