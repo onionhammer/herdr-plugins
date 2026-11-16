@@ -1,11 +1,11 @@
 # Terminal switcher
 
-Alt+Tab for Herdr's terminals, in the style of Windows' Alt+Tab or Arc's Ctrl+Tab. Hold Ctrl and press Tab, and every terminal in every space shows as a tile with its latest screen, most recently used first. The terminal you were in before is already picked, so a quick Ctrl+Tab takes you back. Keep holding Ctrl and press Tab to move on, or Shift+Tab to move back. Let go of Ctrl and you're there: it switches space and tab if it has to, and the keyboard goes to that terminal.
+Alt+Tab for Herdr's terminals, in the style of Windows' Alt+Tab or Arc's Ctrl+Tab. Hold Ctrl and press Tab, and every terminal in every space shows as a tile with its latest screen. Agents that need attention come first, then agents that finished while you weren't looking, then agents still working, then the rest. Within each group, the most recently used come first. A quick Ctrl+Tab takes you to an agent that needs attention or has finished, or back to the terminal you were in before if none has. Working agents are only sorted ahead, they don't take the pick. Keep holding Ctrl and press Tab to move on, or Shift+Tab to move back. Let go of Ctrl and you're there: it switches space and tab if it has to, and the keyboard goes to that terminal.
 
 ## What you see
 
 - **A dimmed window with one card in the middle.** The card is `popover` with a 1 px `border` line, a 14 px radius, a large shadow and 16 px padding.
-- **Its header.** "Switch terminal" in 13 px semibold `foreground`. On the right, key hints in 11 px `dim`: `Tab` next, `Shift+Tab` back, `Ctrl` let go to switch, `Esc` stay, `Middle-click` close. Each key sits in a small box with a `border` outline.
+- **Its header.** "Switch terminal" in 13 px semibold `foreground`. Beside it, when any are hidden, "3 idle for 12 h+ hidden" in 11 px `dim`. On the right, key hints in 11 px `dim`: `Tab` next, `Shift+Tab` back, `Ctrl` let go to switch, `Esc` stay, `Middle-click` close. Each key sits in a small box with a `border` outline.
 - **The tiles.** They're 248 px wide, laid out in a grid with 12 px gaps. The grid has as many columns as fit in the window, up to 5. When more rows exist than fit, the grid scrolls and keeps the picked tile in view. Each tile, from top to bottom:
   - The program's icon and name in 12 px medium `foreground`. An agent shows its terminal title instead (Claude Code's task name, for example). The terminal you came from says "current". On the right is its status: a turning spinner while it's working, `●` in `blocked` or `done`, `○` idle. On the picked tile, and on the one under the pointer, a 12 px × follows it (`mods/pane/close.svg`, `dim`, with a `hover` background under the pointer).
   - A 136 px preview: the last 17 lines of the screen that aren't blank, in the terminal font at 6 px, `muted`, on `background` with a `border` line. A terminal that can't be read says "No preview".
@@ -15,7 +15,7 @@ Alt+Tab for Herdr's terminals, in the style of Windows' Alt+Tab or Arc's Ctrl+Ta
 
 ## How it behaves
 
-- **Ctrl+Tab** opens the card with the second tile picked: the terminal you were in before this one. **Ctrl+Shift+Tab** opens it with the last tile picked.
+- **Ctrl+Tab** opens the card with the first `blocked` agent picked, else the first `done` one. With neither, it picks the terminal you were in before this one, wherever its tile sits (after the `working` agents, say). If the keyboard isn't in a listed terminal (a mod pane has it, say), your own tile isn't there to skip, so that's the first `blocked` or `done` agent, else the most recently used terminal. **Ctrl+Shift+Tab** opens it with the last tile picked.
 - **While it's open:**
   - Tab moves to the next tile and Shift+Tab to the one before, wrapping at the ends, with Ctrl held or not.
   - ← and → step one tile. ↑ and ↓ step one row and stop at the ends.
@@ -28,17 +28,24 @@ Alt+Tab for Herdr's terminals, in the style of Windows' Alt+Tab or Arc's Ctrl+Ta
   A quick terminal goes through `quick-terminal.show` instead, which opens its panel and gives it the keyboard. Picking the terminal you came from just closes the card.
 - **Leaving.** Esc, or a click beside the card (Ctrl held or not), closes it and changes nothing.
 - **Closing a terminal.** The tile's ×, or a middle click anywhere on the tile, closes that terminal the way the pane header's × does: `pane.close {pane}`, or `terminal.kill {terminal}` for a quick terminal. The tile goes at once. The card stays open, the pick moves to the tile that takes its place, and the card keeps the keyboard, so letting go of Ctrl still switches. Closing a space's last tab closes the space, and Herdr asks first. If you cancel, the tile comes back.
-- **The order is last used first.** The terminal that has the keyboard comes first, then the others from most to least recently focused. The controller records `focused().terminal` each time it changes, and keeps the list in its `localStorage`, so it survives a restart.
+- **The order is urgent first, then last used first.** The terminal that has the keyboard comes first, whatever its status. Then come agents that are `blocked` (they need attention), then agents that are `done` (finished while you weren't looking), then agents that are `working`, the same ranking Herdr gives spaces and tabs (blocked > done > working). Then idle agents and plain terminals. Each group goes from most to least recently focused.
+  - The order is set when the card opens. A status that changes while it's open doesn't move any tiles. A `done` agent turns `idle` once you look at it, so next time it's back in its usual place.
+  - For recently used, the controller records `focused().terminal` each time it changes, and keeps the list in its `localStorage`, so it survives a restart. It also stamps the time on the terminal it came from and the one it went to, for hiding (see What's listed).
   - The switcher's own switch passes through other terminals on its way: the other space's shown pane, then the tab's. Only the terminal it was going to counts, for up to 3 s.
   - Herdr keeps no record of when a terminal was last used, so terminals not focused since the switcher was installed are placed by guess. Each space's shown tab is the one last used in that space, so those come next, the shown space's first. The rest follow in sidebar order (space, tab, pane).
   - Ended terminals drop off the list. Terminals on a machine that isn't loaded right now keep their place.
 - **What's listed.** Every terminal pane in every tab of every space, on this computer and on connected machines. Quick terminals from the [quick-terminal](../quick-terminal/) plugin are listed too, when the shown layout has its panel. Mod panes (a file viewer, say) aren't terminals, so they aren't listed. Neither are sub-agents without a pane.
+- **Idle terminals unused for 12 hours are hidden.** An idle agent or a plain terminal (no status) that hasn't had the keyboard for 12 hours doesn't get a tile. The terminal you're in always does, and so does every agent that's `blocked`, `done` or `working`, however long ago you used it. The header counts what's hidden. The terminals are still there, in the sidebar, and using one there puts it back.
+  - "Had the keyboard" runs from the moment you leave it: time spent sitting in a terminal counts as using it. Terminals the switcher only passes through on its way somewhere don't count.
+  - A terminal's clock starts the first time the switcher sees it. A terminal you just opened isn't hidden even if it never had the keyboard, and neither are terminals from before this was added. They get 12 hours from the first Ctrl+Tab.
+  - The clock keeps running while the window is closed. A night away hides every idle terminal you didn't use the day before.
+  - Times are kept in the controller's `localStorage` beside the recently-used list, and ended terminals are dropped the same way.
 - **Previews stay current.** Every terminal is read with `hc read <address>` when the card opens, and again every second while it's open. Titles and statuses update live.
 
 ## Built from
 
 - **`mods/terminal-switcher/`**: `main.js` and `mod.json` (`{ "place": "none", "title": "Terminal switcher" }`). One mod, two kinds of copy, told apart by `props.role`:
-  - `"controller"` floats on the layout root and draws an empty `div()`. Floats are always shown, so it gets `terminal-switcher.next` and `.prev` from `nextCommand()`, which only reaches shown copies. On every render, it moves `focused().terminal` to the front of its recently-used list. On a command, it opens the picker: `openOverlay({ mod: "terminal-switcher", kind: "dialog", frame: "none", width: 1, height: 1, props: { role: "picker", step, here, order } })`.
+  - `"controller"` floats on the layout root and draws an empty `div()`. Floats are always shown, so it gets `terminal-switcher.next` and `.prev` from `nextCommand()`, which only reaches shown copies. On every render, it moves `focused().terminal` to the front of its recently-used list. On a command, it opens the picker: `openOverlay({ mod: "terminal-switcher", kind: "dialog", frame: "none", width: 1, height: 1, props: { role: "picker", step, here, order, seen } })`, where `seen` is when each terminal last had the keyboard (each copy has its own `localStorage`, so the picker gets it this way).
   - `"picker"` is that dialog. It covers the whole window and centers its own card, so the card fits its tiles without knowing the window's size. It takes the keyboard in `init` (`cx.focus_handle()`, then `.focus()`) and handles keys with `on_key_down`. `on_modifiers_changed` reporting `control: false` means Ctrl was let go. `on_mouse_move` on its root counts the pointer's travel, and each tile's `on_hover` moves the pick once it has gone 8 px. The tiles, their ×, the card and the backdrop take the right mouse button as well as the left (see Watch out).
   - Presses after the first reach the open picker from the controller through a small inbox kept at module scope, which both copies share. The picker's own task waits on it, so its `cx` redraws the picker.
   - From `herdr`, it uses `spaces`, `panes`, `terminals`, `focused`, `machines`, `layout`, `hc` (`read`), `run` (`space.select`, `tab.select`, `pane.focus`, `pane.close`, `terminal.kill`, `quick-terminal.show`), `openOverlay` / `closeOverlay`, `nextCommand`, `shared` / `setShared` (`space.colors`, as the shipped mods keep it), `settings` (the terminal font and zoom), `notify`, `home`, `props` and `theme`.
@@ -68,6 +75,10 @@ Alt+Tab for Herdr's terminals, in the style of Windows' Alt+Tab or Arc's Ctrl+Ta
 - Ctrl+Tab, then letting go, goes back to the terminal you were in before, even in another space. Doing it again comes back.
 - Holding Ctrl and pressing Tab three times picks the fourth tile, and letting go goes there, switching space and tab as needed.
 - Ctrl+Shift+Tab picks the least recent terminal.
+- An idle or plain terminal unused for 12 hours has no tile, and the header counts it. Using it from the sidebar brings it back. The current terminal, and agents that are `blocked`, `done` or `working`, show however old.
+- A terminal opened in the background (never focused) shows for its first 12 hours.
+- With an agent `blocked` in another space, Ctrl+Tab then letting go goes to it. With one `blocked`, one `done` and one `working`, the `blocked` one is picked, the `done` one is next, then the `working` one, then the idle ones and plain terminals, by last use. Tiles don't move when a status changes while the card is open.
+- With agents `working` but none `blocked` or `done`, Ctrl+Tab then letting go goes back to the terminal you were in before, not to a working agent.
 - Each tile shows the program, its status, its latest screen, and its space, tab and folder. The previews change while the card is open.
 - Esc leaves everything as it was. Clicking a tile goes there.
 - Holding Ctrl, clicking a tile goes there at once. On macOS this arrives as a right-button press.

@@ -1,7 +1,9 @@
 // Terminal switcher: Alt+Tab for terminals. Hold Ctrl and press Tab, and every
-// terminal in every space shows as a tile with its latest screen, most recently
-// used first, with the one you were in before already picked. Tab moves on,
-// Shift+Tab moves back, and letting go of Ctrl goes there.
+// terminal in every space shows as a tile with its latest screen: agents that
+// need attention, then finished ones, then working ones, then the rest, each
+// group most recently used first. The first
+// after your own is already picked. Tab moves on, Shift+Tab moves back, and
+// letting go of Ctrl goes there.
 //
 // One mod, two kinds of copy, told apart by props.role:
 //   "controller"  a floating block on the layout root that draws nothing. It is
@@ -39,6 +41,7 @@ const LINES = 17;
 const REFRESH_MS = 1000;
 const POINT_PX = 8; // how far the pointer moves before it picks tiles
 const STATUSES = new Set(["working", "blocked", "done", "idle"]);
+const HIDE_IDLE_MS = 12 * 60 * 60 * 1000; // idle this long without the keyboard: not listed
 
 // Shared by both copies (same module): the open picker's inbox, or a stand-in
 // that queues presses made before the picker has started; and the switch the
@@ -160,6 +163,20 @@ function arrange(list, order) {
     .map((x) => x.e);
 }
 
+// Agents that want you go first: blocked (needs attention), then done (finished
+// while you weren't looking), then working, as Herdr ranks them (blocked > done
+// > working). Then idle agents and plain terminals. Each group keeps the order
+// it came in: most recently used first. The terminal you're in stays at the
+// front. Applied once, when the card opens.
+const URGENCY = { blocked: 0, done: 1, working: 2 };
+function urgentFirst(list, here) {
+  const u = (e) => (e.address === here ? -1 : URGENCY[e.status] ?? 3);
+  return list
+    .map((e, i) => ({ e, i }))
+    .sort((a, b) => u(a.e) - u(b.e) || a.i - b.i)
+    .map((x) => x.e);
+}
+
 // The bottom of a screen: its last LINES lines that aren't blank.
 function tail(text) {
   const lines = (text ?? "").replace(/\r/g, "").split("\n").map((l) => l.replace(/\s+$/, "").slice(0, 200));
@@ -174,11 +191,24 @@ function saveOrder(order) {
   try { localStorage.setItem("mru", JSON.stringify(order)); } catch {}
 }
 
+// When each terminal last had the keyboard (address → ms), so idle ones nobody
+// has used for HIDE_IDLE_MS can be left out.
+function loadSeen() {
+  try {
+    const raw = JSON.parse(localStorage.getItem("seen") ?? "{}");
+    return Object.fromEntries(Object.entries(raw).filter(([, t]) => typeof t === "number"));
+  } catch { return {}; }
+}
+function saveSeen(seen) {
+  try { localStorage.setItem("seen", JSON.stringify(seen)); } catch {}
+}
+
 export default class TerminalSwitcher extends View {
   init(_props, cx) {
     this.role = props()?.role ?? "controller";
     if (this.role === "picker") return this.initPicker(cx);
     this.order = loadOrder();
+    this.seen = loadSeen();
     cx.spawn(async () => {
       for (;;) {
         const command = await nextCommand();
@@ -203,16 +233,23 @@ export default class TerminalSwitcher extends View {
     const here = focused()?.terminal ?? null;
     const list = everyTerminal();
     if (!list.length) return;
+    // A terminal's clock starts when the switcher first sees it, so one that's
+    // new to it (or older than this feature) isn't hidden straight away.
+    const now = Date.now();
+    let fresh = false;
+    for (const e of list) if (!(e.address in this.seen)) { this.seen[e.address] = now; fresh = true; }
+    if (fresh) saveSeen(this.seen);
     bus.inbox = new Inbox();
     bus.inbox.seen = Date.now();
     openOverlay({
       mod: MOD, kind: "dialog", frame: "none", width: 1, height: 1,
-      props: { role: "picker", step, here, order: [here, ...this.order].filter(Boolean) },
+      props: { role: "picker", step, here, order: [here, ...this.order].filter(Boolean), seen: this.seen },
     });
   }
 
   // The terminal that has the keyboard goes to the front. While the picker's
-  // switch is on its way, only its destination counts.
+  // switch is on its way, only its destination counts. The one it came from and
+  // the one it went to are both stamped as used now.
   note() {
     const a = focused()?.terminal;
     const going = bus.going;
@@ -222,12 +259,17 @@ export default class TerminalSwitcher extends View {
       else bus.going = null;
     }
     if (!a || a === this.order[0]) return;
+    const now = Date.now();
+    if (this.order[0]) this.seen[this.order[0]] = now;
+    this.seen[a] = now;
     // Forget ended terminals, but not those on a machine that isn't loaded now.
     const live = new Set(terminals().map((x) => x.address));
     const loaded = new Set(machines().filter((m) => m.layout === "ready").map((m) => m.name ?? null));
     const ended = (x) => live.size && loaded.has(machineOf(x)) && !live.has(x);
     this.order = [a, ...this.order.filter((x) => x !== a && !ended(x))].slice(0, 200);
+    this.seen = Object.fromEntries(Object.entries(this.seen).filter(([x]) => !ended(x)));
     saveOrder(this.order);
+    saveSeen(this.seen);
   }
 
   // ── picker ──────────────────────────────────────────────────────────────
@@ -238,9 +280,19 @@ export default class TerminalSwitcher extends View {
     this.handle.focus();
     this.scroll = ScrollHandle.new();
     this.here = p.here ?? null;
-    this.order = arrange(everyTerminal(), p.order ?? []).map((e) => e.address);
+    this.seen = p.seen ?? {};
+    // Fixed from here on: a status that changes while the card is open doesn't
+    // move tiles under the pick.
+    const recent = arrange(this.shown(everyTerminal()), p.order ?? []);
+    const urgent = urgentFirst(recent, this.here);
+    this.order = urgent.map((e) => e.address);
     const n = this.order.length;
-    this.at = n < 2 ? 0 : (p.step ?? 1) < 0 ? n - 1 : 1;
+    // Ctrl+Tab picks the most urgent agent that wants you (blocked or done);
+    // otherwise the terminal last used before this one. A working agent doesn't
+    // take the pick, it only sorts ahead of the rest.
+    const others = (l) => l.filter((e) => e.address !== this.here);
+    const pick = others(urgent).find((e) => URGENCY[e.status] <= URGENCY.done) ?? others(recent)[0];
+    this.at = n < 2 ? 0 : (p.step ?? 1) < 0 ? n - 1 : Math.max(0, this.order.indexOf(pick?.address));
     this.text = {};
     this.done = false;
     this.cols = 1;
@@ -276,11 +328,24 @@ export default class TerminalSwitcher extends View {
     if (this.role === "picker" && bus.inbox === this.inbox) bus.inbox = null;
   }
 
+  // Idle agents and plain terminals that haven't had the keyboard for
+  // HIDE_IDLE_MS aren't listed. The one you're in, and agents that are blocked,
+  // done or working, always are.
+  stale(e, now = Date.now()) {
+    if (e.address === this.here || URGENCY[e.status] !== undefined) return false;
+    const t = this.seen[e.address];
+    return t !== undefined && now - t > HIDE_IDLE_MS;
+  }
+  shown(list) {
+    const now = Date.now();
+    return list.filter((e) => !this.stale(e, now));
+  }
+
   list() {
     // A closed tile goes at once, before Herdr's lists catch up. If the terminal
     // is still there a moment later (its space's close was cancelled), it's back.
     const now = Date.now();
-    const all = everyTerminal().filter((e) => !(now - (this.closing.get(e.address) ?? -Infinity) < 1500));
+    const all = this.shown(everyTerminal()).filter((e) => !(now - (this.closing.get(e.address) ?? -Infinity) < 1500));
     // Opened order; anything that started since goes last.
     return arrange(all, this.order);
   }
@@ -455,6 +520,8 @@ export default class TerminalSwitcher extends View {
   renderPicker() {
     const t = theme();
     const list = this.list();
+    const now = Date.now();
+    const hidden = everyTerminal().filter((e) => this.stale(e, now)).length;
     // Keep the pick on the same terminal when the list changes under it.
     const picked = this.order[this.at];
     this.order = list.map((e) => e.address);
@@ -514,7 +581,10 @@ export default class TerminalSwitcher extends View {
           .on_mouse_down("right", (_e, cx) => cx.stop_propagation())
           .child(
             h_flex().gap(8).items_center().text_size(11).text_color(t.dim)
-              .child(div().flex_1().text_size(13).font_semibold().text_color(t.foreground).child("Switch terminal"))
+              .child(h_flex().flex_1().gap(8).items_baseline()
+                .child(div().text_size(13).font_semibold().text_color(t.foreground).child("Switch terminal"))
+                .when(hidden > 0, (el) => el.child(div().text_color(t.dim)
+                  .child(`${hidden} idle for 12 h+ hidden`))))
               .child(key("Tab")).child("next")
               .child(key("Shift+Tab")).child("back")
               .child(key("Ctrl")).child("let go to switch")
