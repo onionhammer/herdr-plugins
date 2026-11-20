@@ -1,0 +1,5 @@
+{
+  "global": {
+    "ctrl-r": "recent-spaces.open"
+  }
+}
