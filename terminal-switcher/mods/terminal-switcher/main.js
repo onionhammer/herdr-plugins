@@ -21,6 +21,9 @@
 //
 // Quick terminals (the quick-terminal plugin) are listed too, when the shown
 // layout has its panel; going to one asks quick-terminal to show it.
+//
+// With a space group shown (the space-groups plugin), only terminals in that
+// group's spaces are listed, as in the sidebar.
 
 import { View, div, svg, image } from "gpui-kit";
 import { h_flex, v_flex, ScrollHandle } from "gpui-base";
@@ -109,6 +112,15 @@ function spaceColor(t, s) {
   if (s.name === "~") return t.dim;
   const c = spaceColors()[s.id] ?? SPACE_COLORS[0];
   return c.startsWith("#") ? c : (MARK[c] ?? t[c]);
+}
+
+// Space groups (the space-groups plugin): the group the sidebar shows, or null
+// when it shows every space or the plugin isn't installed. The same reading as
+// its spaces and agents lists, so the three agree.
+function shownGroup() {
+  const g = shared("space-groups");
+  const group = Array.isArray(g?.groups) ? g.groups.find((x) => x?.id === g.shown) : null;
+  return group ? { ...group, has: (space) => g.of?.[space] === group.id } : null;
 }
 
 // Every terminal you can go to: each tab's terminal panes, then the quick
@@ -231,14 +243,16 @@ export default class TerminalSwitcher extends View {
     if (inbox && Date.now() - inbox.seen < 3000) return inbox.send({ step, from: "command" });
     this.note();
     const here = focused()?.terminal ?? null;
-    const list = everyTerminal();
-    if (!list.length) return;
+    const all = everyTerminal();
     // A terminal's clock starts when the switcher first sees it, so one that's
-    // new to it (or older than this feature) isn't hidden straight away.
+    // new to it (or older than this feature) isn't hidden straight away. Every
+    // group's terminals start theirs, not just the shown group's.
     const now = Date.now();
     let fresh = false;
-    for (const e of list) if (!(e.address in this.seen)) { this.seen[e.address] = now; fresh = true; }
+    for (const e of all) if (!(e.address in this.seen)) { this.seen[e.address] = now; fresh = true; }
     if (fresh) saveSeen(this.seen);
+    const group = shownGroup();
+    if (!all.some((e) => !group || group.has(e.space.id))) return;
     bus.inbox = new Inbox();
     bus.inbox.seen = Date.now();
     openOverlay({
@@ -281,6 +295,9 @@ export default class TerminalSwitcher extends View {
     this.scroll = ScrollHandle.new();
     this.here = p.here ?? null;
     this.seen = p.seen ?? {};
+    // The space group shown when the card opened. Only its spaces' terminals
+    // are listed, and that holds while the card is open.
+    this.group = shownGroup();
     // Fixed from here on: a status that changes while the card is open doesn't
     // move tiles under the pick.
     const recent = arrange(this.shown(everyTerminal()), p.order ?? []);
@@ -338,7 +355,11 @@ export default class TerminalSwitcher extends View {
   }
   shown(list) {
     const now = Date.now();
-    return list.filter((e) => !this.stale(e, now));
+    return this.grouped(list).filter((e) => !this.stale(e, now));
+  }
+  // With a space group shown, only its spaces' terminals.
+  grouped(list) {
+    return this.group ? list.filter((e) => this.group.has(e.space.id)) : list;
   }
 
   list() {
@@ -521,7 +542,7 @@ export default class TerminalSwitcher extends View {
     const t = theme();
     const list = this.list();
     const now = Date.now();
-    const hidden = everyTerminal().filter((e) => this.stale(e, now)).length;
+    const hidden = this.grouped(everyTerminal()).filter((e) => this.stale(e, now)).length;
     // Keep the pick on the same terminal when the list changes under it.
     const picked = this.order[this.at];
     this.order = list.map((e) => e.address);
@@ -583,6 +604,8 @@ export default class TerminalSwitcher extends View {
             h_flex().gap(8).items_center().text_size(11).text_color(t.dim)
               .child(h_flex().flex_1().gap(8).items_baseline()
                 .child(div().text_size(13).font_semibold().text_color(t.foreground).child("Switch terminal"))
+                .when(Boolean(this.group), (el) => el.child(div().max_w(160).truncate().text_size(12).text_color(t.muted)
+                  .child(`in ${this.group.name}`)))
                 .when(hidden > 0, (el) => el.child(div().text_color(t.dim)
                   .child(`${hidden} idle for 12 h+ hidden`))))
               .child(key("Tab")).child("next")
@@ -600,7 +623,8 @@ export default class TerminalSwitcher extends View {
                   .max_h(fit * (rowH + GAP) - GAP)
                   .gap(GAP)
                   .children(rows.map((row, r) => h_flex().gap(GAP).children(row.map((e, c) => this.tile(t, e, r * this.cols + c, font)))))
-              : div().w(TILE_W).py(24).text_size(12).text_color(t.dim).child("No terminals"),
+              : div().w(TILE_W).py(24).text_size(12).text_color(t.dim)
+                  .child(this.group ? `No terminals in ${this.group.name}` : "No terminals"),
           ),
       );
   }

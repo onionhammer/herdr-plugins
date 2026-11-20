@@ -1,6 +1,6 @@
 # Space groups
 
-Name groups of spaces, such as Personal, Work 1 and Work 2, and show one group at a time. A strip of pills above the spaces list reads "All · Personal · Work 1 · Work 2 · +". Click one and the sidebar lists only that group's spaces and their agents, and Herdr goes to the space you last used there. It's a level above spaces, like virtual desktops. A space made while a group is shown joins that group. Going to a space in another group by any other route (a key, the terminal switcher, a notification) shows that space's group, so the space you're in is always listed. A dot on a pill says something in that group needs you.
+Name groups of spaces, such as Personal, Work 1 and Work 2, and show one group at a time. A strip of pills above the spaces list reads "All · Personal · Work 1 · Work 2 · +". Click one and the sidebar lists only that group's spaces and their agents, the terminal switcher lists only their terminals, and Herdr goes to the space you last used there. It's a level above spaces, like virtual desktops. A space made while a group is shown joins that group. Going to a space in another group by any other route (a key, the terminal switcher, a notification) shows that space's group, so the space you're in is always listed. A dot on a pill says something in that group needs you.
 
 ## What you see
 
@@ -14,6 +14,7 @@ Name groups of spaces, such as Personal, Work 1 and Work 2, and show one group a
   - An empty group says "No spaces in Work 1 yet." in 12 px `dim`, followed by two rows: "+ New space" and "Choose spaces…".
   - With other machines, their headers stay. A machine with none of the group's spaces shows its usual "New space there".
 - **The agents list** shows only agents in the shown group's spaces, in its usual priority or grouped view. When none are there, it says "No agents in Work 1."
+- **The terminal switcher** ([terminal-switcher](../terminal-switcher/), if installed) lists only the shown group's terminals, and its header names the group. It reads `shared("space-groups")` itself, so nothing here changes for it.
 - **The group dialog** (+, or Edit). It's 420 px wide and as tall as 12 spaces need; past that, the list scrolls. Herdr's prompt look: `popover`, 18 px padding.
   - The title is "New group" or "Edit group", with an "Esc" hint.
   - **Name** is a 36 px input with a 9 px radius, outlined in `accent` while it has the keyboard. The placeholder is "Personal, Work…".
@@ -123,7 +124,7 @@ Name groups of spaces, such as Personal, Work 1 and Work 2, and show one group a
 - **Save once.** Enter in the name field can reach both the input's `submit` and the dialog's own key handler. Without a guard, a new group gets made twice.
 - **`herdr-app check` can't pass props,** so it only ever renders the role-less copy, which draws nothing. Check the roles in the app.
 - **Herdr's space keys don't know about groups.** Alt+1…9 and `space.next` / `space.prev` count every space. Going to one in another group shows that group, so nothing is hidden, but the numbers aren't per group.
-- **Only the sidebar is filtered.** The terminal switcher, the search, the tab bar and the status bar still see every space. Pinned agents in a hidden group are hidden with it.
+- **Only the sidebar and the terminal switcher are filtered.** The search, the tab bar and the status bar still see every space. Pinned agents in a hidden group are hidden with it.
 - **Clones aren't updated.** `space-groups-spaces` and `space-groups-agents` stay as they were when cloned. After a Herdr update that changes `spaces` or `agents`, clone again and redo the few lines above. A clone also starts with its own empty `localStorage`. The agents list's "for how long" times start over, and folded machine sections unfold.
 - **One list of groups per window.** `shared` lives in this window's `shared.json`, so groups aren't shared with other Herdr clients. A space on another machine keeps its group while that machine is away.
 - **Each `setShared` re-renders every mod,** so `track()` compares before it writes, and a switch of space within a group writes once (its new last space).
